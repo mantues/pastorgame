@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Pastor (パストール) - スマホ対戦版</title>
+    <style>
+        body {
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            background-color: #121212;
+            color: #ffffff;
+            margin: 0;
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            box-sizing: border-box;
+        }
+
+        #info-panel {
+            text-align: center;
+            margin-bottom: 15px;
+            font-size: 1.1rem;
+            font-weight: bold;
+            padding: 10px;
+            border-radius: 8px;
+            width: 100%;
+            max-width: 400px;
+            background-color: #1e1e1e;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+
+        #board {
+            display: grid;
+            grid-template-rows: repeat(9, 1fr);
+            grid-template-columns: repeat(5, 1fr);
+            gap: 2px;
+            background-color: #444444;
+            padding: 2px;
+            border-radius: 8px;
+            width: 100%;
+            max-width: 400px;
+            aspect-ratio: 5 / 9;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.5);
+        }
+
+        .cell {
+            background-color: #2a2a2a;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            touch-action: manipulation; /* スマホのダブルタップズームを防止 */
+        }
+
+        /* ゴールエリアの色付け */
+        .cell.goal-red { background-color: #3a1a1a; }
+        .cell.goal-blue { background-color: #1a2a3a; }
+
+        /* 選択中のハイライト */
+        .cell.selected {
+            outline: 3px solid #ff9800;
+            outline-offset: -3px;
+            z-index: 10;
+        }
+
+        .piece {
+            width: 75%;
+            height: 75%;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.4);
+            transition: transform 0.1s ease;
+        }
+
+        .piece.red { background-color: #ff5252; border: 2px solid #b71c1c; }
+        .piece.blue { background-color: #448aff; border: 2px solid #0d47a1; }
+
+        .ball {
+            width: 45%;
+            height: 45%;
+            border-radius: 50%;
+            background-color: #ffd700;
+            border: 2px solid #ffa000;
+            box-shadow: inset 0 2px 4px rgba(255,255,255,0.6);
+        }
+
+        #msg-panel {
+            margin-top: 15px;
+            min-height: 40px;
+            color: #ff9800;
+            font-weight: bold;
+            text-align: center;
+            max-width: 400px;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="info-panel">読み込み中...</div>
+    <div id="board"></div>
+    <div id="msg-panel"></div>
+
+    <script>
+        const ROWS = 9;
+        const COLS = 5;
+
+        // ゲーム状態
+        // 0: 空, 1: 赤コマ, 2: 青コマ
+        let board = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
+        let ballPos = { r: 4, c: 4 };
+        let attackerSide = 1;       // 1: 赤, 2: 青
+        let currentTurnSide = 2;    // 最初の手番は守備側（青）からスタート
+        let actionsLeft = 1;
+        let selectedPos = null;
+        let lastRobbedPiece = null; // 連続奪い返し制限用
+        let gameOver = false;
+
+        // 初期配置
+        function setupGame() {
+            // 青（左端: 列0）
+            for (let r = 0; r < ROWS; r += 2) board[r][0] = 2;
+            // 赤（右端: 列4）
+            for (let r = 0; r < ROWS; r += 2) board[r][4] = 1;
+            
+            ballPos = { r: 4, c: 4 };
+            attackerSide = 1;
+            currentTurnSide = 2;
+            actionsLeft = 1;
+            gameOver = false;
+            selectedPos = null;
+            lastRobbedPiece = null;
+        }
+
+        function createBoardGUI() {
+            const boardDiv = document.getElementById('board');
+            boardDiv.innerHTML = '';
+            
+            for (let r = 0; r < ROWS; r++) {
+                for (let c = 0; c < COLS; c++) {
+                    const cell = document.createElement('div');
+                    cell.classList.add('cell');
+                    cell.dataset.row = r;
+                    cell.dataset.col = c;
+
+                    // ゴールエリア判定
+                    if (c === 0) cell.classList.add('goal-red');
+                    if (c === COLS - 1) cell.classList.add('goal-blue');
+
+                    cell.addEventListener('click', () => handleCellClick(r, c));
+                    boardDiv.appendChild(cell);
+                }
+            }
+        }
+
+        function updateGUI() {
+            if (gameOver) return;
+
+            // インフォメーション更新
+            const info = document.getElementById('info-panel');
+            const role = (currentTurnSide === attackerSide) ? "攻撃側" : "守備側";
+            const sideText = (currentTurnSide === 1) ? "赤 (RED)" : "青 (BLUE)";
+            const color = (currentTurnSide === 1) ? "#ff5252" : "#448aff";
+            info.innerHTML = `手番: <span style="color: ${color}">${sideText} [${role}]</span><br>残り行動: ${actionsLeft}`;
+
+            // 盤面描画
+            const cells = document.querySelectorAll('.cell');
+            cells.forEach(cell => {
+                const r = parseInt(cell.dataset.row);
+                const c = parseInt(cell.dataset.col);
+                cell.innerHTML = '';
+                cell.classList.remove('selected');
+
+                // 選択ハイライト
+                if (selectedPos && selectedPos.r === r && selectedPos.c === c) {
+                    cell.classList.add('selected');
+                }
+
+                // コマの描画
+                if (board[r][c] === 1) {
+                    const piece = document.createElement('div');
+                    piece.classList.add('piece', 'red');
+                    if (ballPos.r === r && ballPos.c === c) {
+                        const ball = document.createElement('div');
+                        ball.classList.add('ball');
+                        piece.appendChild(ball);
+                    }
+                    cell.appendChild(piece);
+                } else if (board[r][c] === 2) {
+                    const piece = document.createElement('div');
+                    piece.classList.add('piece', 'blue');
+                    if (ballPos.r === r && ballPos.c === c) {
+                        const ball = document.createElement('div');
+                        ball.classList.add('ball');
+                        piece.appendChild(ball);
+                    }
+                    cell.appendChild(piece);
+                }
+            });
+        }
+
+        function showMessage(msg, isError = false) {
+            const msgPanel = document.getElementById('msg-panel');
+            msgPanel.innerText = msg;
+            msgPanel.style.color = isError ? "#ff5252" : "#ff9800";
+            if(msg) {
+                setTimeout(() => { msgPanel.innerText = ''; }, 3000);
+            }
+        }
+
+        function handleCellClick(r, c) {
+            if (gameOver) return;
+            const clickedPiece = board[r][c];
+
+            // パス最優先処理 (攻撃側がすでにコマを選択しており、別の味方コマをタップしたとき)
+            if (selectedPos && currentTurnSide === attackerSide) {
+                if (clickedPiece === currentTurnSide && (selectedPos.r !== r || selectedPos.c !== c)) {
+                    if (selectedPos.r === ballPos.r && selectedPos.c === ballPos.c) {
+                        actionPass(selectedPos, { r, c });
+                        selectedPos = null;
+                        updateGUI();
+                        return;
+                    }
+                }
+            }
+
+            // 1. 自分のコマを選択
+            if (clickedPiece === currentTurnSide) {
+                selectedPos = { r, c };
+                updateGUI();
+                return;
+            }
+
+            // 2. アクション実行
+            if (selectedPos) {
+                const dist = Math.max(Math.abs(selectedPos.r - r), Math.abs(selectedPos.c - c));
+
+                // --- 守備側の行動 ---
+                if (currentTurnSide !== attackerSide) {
+                    // 奪う
+                    if (r === ballPos.r && c === ballPos.c && dist === 1) {
+                        actionSteal(selectedPos, { r, c });
+                    }
+                    // 移動
+                    else if (clickedPiece === 0 && dist === 1) {
+                        actionMove(selectedPos, { r, c });
+                    }
+                } 
+                // --- 攻撃側の行動 ---
+                else {
+                    // 移動のみ（パスは上で処理済み）
+                    if (clickedPiece === 0 && dist === 1) {
+                        actionMove(selectedPos, { r, c });
+                    }
+                }
+                selectedPos = null;
+                updateGUI();
+            }
+        }
+
+        function actionMove(start, end) {
+            board[end.r][end.c] = board[start.r][start.c];
+            board[start.r][start.c] = 0;
+
+            if (start.r === ballPos.r && start.c === ballPos.c) {
+                ballPos = { r: end.r, c: end.c };
+                if (checkVictory()) return;
+            }
+            finishAction();
+        }
+
+        function actionPass(start, end) {
+            let isValid = false;
+            if (attackerSide === 1) { // 赤：左に進むので後ろは右（列番号大）
+                if (end.c > start.c) isValid = true;
+            } else {                  // 青：右に進むので後ろは左（列番号小）
+                if (end.c < start.c) isValid = true;
+            }
+
+            if (isValid) {
+                ballPos = { r: end.r, c: end.c };
+                finishAction();
+            } else {
+                const dir = (attackerSide === 1) ? "右側の列（後ろ）" : "左側の列（後ろ）";
+                showMessage(`パスは【${dir}】の味方にしか出せません。`, true);
+            }
+        }
+
+        function actionSteal(stealer, ball) {
+            if (lastRobbedPiece && stealer.r === lastRobbedPiece.r && stealer.c === lastRobbedPiece.c) {
+                showMessage("奪われた直後の同じコマでは奪い返せません。", true);
+                return;
+            }
+
+            ballPos = { r: stealer.r, c: stealer.c };
+            lastRobbedPiece = { r: ball.r, c: ball.c };
+
+            // 攻守交代
+            attackerSide = (attackerSide === 1) ? 2 : 1;
+            currentTurnSide = attackerSide;
+            actionsLeft = 2;
+
+            updateGUI();
+            alert(`ボール奪取！ 攻守が交代し、${attackerSide === 1 ? '赤' : '青'}の攻撃です。`);
+        }
+
+        function finishAction() {
+            actionsLeft--;
+            if (actionsLeft <= 0) {
+                switchTurn();
+            } else {
+                updateGUI();
+            }
+        }
+
+        function switchTurn() {
+            currentTurnSide = (currentTurnSide === 1) ? 2 : 1;
+            actionsLeft = (currentTurnSide === attackerSide) ? 2 : 1;
+
+            if (currentTurnSide === attackerSide) {
+                lastRobbedPiece = null; // ターンが1周したら制限解除
+            }
+            updateGUI();
+        }
+
+        function checkVictory() {
+            if (attackerSide === 1 && ballPos.c === 0) {
+                gameOver = true;
+                document.getElementById('info-panel').innerHTML = '<span style="color:#ff5252; font-size:1.4rem;">赤 (RED) の勝利！</span>';
+                setTimeout(() => { alert("赤（RED）の勝利です！"); }, 10);
+                return true;
+            }
+            if (attackerSide === 2 && ballPos.c === COLS - 1) {
+                gameOver = true;
+                document.getElementById('info-panel').innerHTML = '<span style="color:#448aff; font-size:1.4rem;">青 (BLUE) の勝利！</span>';
+                setTimeout(() => { alert("青（BLUE）の勝利です！"); }, 10);
+                return true;
+            }
+            return false;
+        }
+
+        // 起動
+        setupGame();
+        createBoardGUI();
+        updateGUI();
+    </script>
+</body>
+</html>
