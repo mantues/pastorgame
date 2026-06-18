@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Pastor (パストール) - 完全版</title>
+    <title>Pastor (7x10 決定版)</title>
     <style>
         body {
             font-family: 'Helvetica Neue', Arial, sans-serif;
@@ -21,13 +21,13 @@
 
         #info-panel {
             text-align: center;
-            margin-bottom: 15px;
+            margin-bottom: 10px;
             font-size: 1.1rem;
             font-weight: bold;
-            padding: 10px;
+            padding: 8px;
             border-radius: 8px;
             width: 100%;
-            max-width: 450px;
+            max-width: 400px;
             background-color: #1e1e1e;
             box-shadow: 0 4px 6px rgba(0,0,0,0.3);
         }
@@ -35,15 +35,15 @@
         #board {
             display: grid;
             grid-template-rows: repeat(7, 1fr);
-            /* 両端が半分（0.5 : 1 : 1 : 1 : 1 : 1 : 1 : 1 : 1 : 0.5） */
+            /* 10列：両端は0.5倍の幅、中央8列は1倍の幅 */
             grid-template-columns: 0.5fr repeat(8, 1fr) 0.5fr;
             gap: 2px;
             background-color: #444444;
             padding: 2px;
             border-radius: 8px;
             width: 100%;
-            max-width: 450px;
-            aspect-ratio: 9 / 7; /* 10列(実質9列幅) x 7行の比率調整 */
+            max-width: 420px;
+            aspect-ratio: 9 / 7; /* 横長のフィールドをスマホの幅に合わせる */
             box-shadow: 0 8px 16px rgba(0,0,0,0.5);
         }
 
@@ -56,9 +56,9 @@
             touch-action: manipulation;
         }
 
-        /* 得点エリア（両端のハーフマス） */
-        .cell.goal-left { background-color: #3a1a1a; }
-        .cell.goal-right { background-color: #1a2a3a; }
+        /* ハーフマスのゴールエリア色付け */
+        .cell.goal-left { background-color: #3a1a1a; }  /* 左端（赤のゴール） */
+        .cell.goal-right { background-color: #1a2a3a; } /* 右端（青のゴール） */
 
         /* 選択中のハイライト */
         .cell.selected {
@@ -75,7 +75,6 @@
             align-items: center;
             justify-content: center;
             box-shadow: 0 4px 6px rgba(0,0,0,0.4);
-            transition: transform 0.1s ease;
         }
 
         .piece.red { background-color: #ff5252; border: 2px solid #b71c1c; }
@@ -91,12 +90,13 @@
         }
 
         #msg-panel {
-            margin-top: 15px;
-            min-height: 40px;
+            margin-top: 10px;
+            min-height: 30px;
             color: #ff9800;
             font-weight: bold;
             text-align: center;
-            max-width: 450px;
+            max-width: 400px;
+            font-size: 0.9rem;
         }
     </style>
 </head>
@@ -108,31 +108,33 @@
 
     <script>
         const ROWS = 7;
-        const COLS = 10;
+        const COLS = 10; // 0番目〜9番目の計10列
 
         // ゲーム状態
-        // 0: 空, 1: 赤コマ(初期右側), 2: 青コマ(初期左側)
+        // 0: 空, 1: 赤コマ, 2: 青コマ
         let board = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
-        let ballPos = { r: 3, c: 8 }; // 初期位置：右から2番目の列（c=8）の中央
-        let attackerSide = 1;         // 現在の攻撃側 (1:赤, 2:青)
+        let ballPos = { r: 3, c: 8 }; // 初期位置：右から2番目(列8)の中央
+        let attackerSide = 1;         // 1: 赤, 2: 青
         let currentTurnSide = 2;      // 最初の手番は守備側（青）からスタート
         let actionsLeft = 1;          // 守備側の初期アクション数は1
         let selectedPos = null;
         let lastRobbedPiece = null;   // 連続奪い返し制限用
         let gameOver = false;
 
+        // 初期配置
         function setupGame() {
-            // 守備側（青）：左から2番目の列（列インデックス1）に1マスおきに配置（計4個）
-            for (let r = 0; r < ROWS; r += 2) board[r][1] = 2;
+            // 守備側（青）：左から2番目の列（列1）に、縦に1マスおきに5個配置
+            // 7マス縦方向なので、0, 1, 2, 3, 4, 5, 6 のうち 1,2,3,4,5 を中心に配置
+            let blueRows = [1, 2, 3, 4, 5];
+            blueRows.forEach(r => board[r][1] = 2);
+                
+            // 攻撃側（赤）：右から2番目の列（列8）に、縦に1マスおきに5個配置
+            let redRows = [1, 2, 3, 4, 5];
+            redRows.forEach(r => board[r][8] = 1);
             
-            // 攻撃側（赤）：右から2番目の列（列インデックス8）に1マスおきに配置（計4個）
-            for (let r = 0; r < ROWS; r += 2) board[r][8] = 1;
-            
-            // ボールを中央（行3）の赤コマに配置
-            // ※行が0,2,4,6にしか配置されないため、中央付近の行4にボールを初期配置します
-            ballPos = { r: 4, c: 8 };
+            ballPos = { r: 3, c: 8 }; // 赤の中央（行3, 列8）にボール
             attackerSide = 1;
-            currentTurnSide = 2; // 守備側から
+            currentTurnSide = 2; // 守備側(青)から開始
             actionsLeft = 1;
             gameOver = false;
             selectedPos = null;
@@ -150,9 +152,9 @@
                     cell.dataset.row = r;
                     cell.dataset.col = c;
 
-                    // 両端（列0と列9）を得点ゴールエリアとしてマーク
-                    if (c === 0) cell.classList.add('goal-red');
-                    if (c === COLS - 1) cell.classList.add('goal-blue');
+                    // ハーフマスのゴールエリア判定
+                    if (c === 0) cell.classList.add('goal-left');
+                    if (c === COLS - 1) cell.classList.add('goal-right');
 
                     cell.addEventListener('click', () => handleCellClick(r, c));
                     boardDiv.appendChild(cell);
@@ -167,7 +169,7 @@
             const role = (currentTurnSide === attackerSide) ? "攻撃側" : "守備側";
             const sideText = (currentTurnSide === 1) ? "赤 (RED)" : "青 (BLUE)";
             const color = (currentTurnSide === 1) ? "#ff5252" : "#448aff";
-            info.innerHTML = `手番: <span style="color: ${color}">${sideText} [${role}]</span><br>残り行動: ${actionsLeft}`;
+            info.innerHTML = `手番: <span style="color: ${color}">${sideText} [${role}]</span> | 残り行動: ${actionsLeft}`;
 
             const cells = document.querySelectorAll('.cell');
             cells.forEach(cell => {
@@ -207,7 +209,7 @@
             msgPanel.innerText = msg;
             msgPanel.style.color = isError ? "#ff5252" : "#ff9800";
             if(msg) {
-                setTimeout(() => { msgPanel.innerText = ''; }, 3000);
+                setTimeout(() => { if(msgPanel.innerText === msg) msgPanel.innerText = ''; }, 3000);
             }
         }
 
@@ -215,7 +217,7 @@
             if (gameOver) return;
             const clickedPiece = board[r][c];
 
-            // パス最優先処理 (攻撃側がすでにボール持ちコマを選択しており、別の味方コマをタップしたとき)
+            // パス最優先処理 (攻撃側がボール持ちコマを選択し、別の味方コマをタップ)
             if (selectedPos && currentTurnSide === attackerSide) {
                 if (clickedPiece === currentTurnSide && (selectedPos.r !== r || selectedPos.c !== c)) {
                     if (selectedPos.r === ballPos.r && selectedPos.c === ballPos.c) {
@@ -240,7 +242,7 @@
 
                 // --- 守備側の行動 ---
                 if (currentTurnSide !== attackerSide) {
-                    // 奪う (ボール持ちの敵に隣接)
+                    // 奪う
                     if (r === ballPos.r && c === ballPos.c && dist === 1) {
                         actionSteal(selectedPos, { r, c });
                     }
@@ -251,7 +253,6 @@
                 } 
                 // --- 攻撃側の行動 ---
                 else {
-                    // 移動
                     if (clickedPiece === 0 && dist === 1) {
                         actionMove(selectedPos, { r, c });
                     }
@@ -274,9 +275,9 @@
 
         function actionPass(start, end) {
             let isValid = false;
-            if (attackerSide === 1) { // 赤：左（c=0）へ進むので、後ろは右（列番号大: end.c > start.c）
+            if (attackerSide === 1) { // 赤：左(0)に進むので後ろは右（列大）
                 if (end.c > start.c) isValid = true;
-            } else {                  // 青：右（c=9）へ進むので、後ろは左（列番号小: end.c < start.c）
+            } else {                  // 青：右(9)に進むので後ろは左（列小）
                 if (end.c < start.c) isValid = true;
             }
 
@@ -295,20 +296,19 @@
                 return;
             }
 
-            // ボール奪取成功
             ballPos = { r: stealer.r, c: stealer.c };
             lastRobbedPiece = { r: ball.r, c: ball.c };
 
-            // 攻守交代のコアロジック：
-            // 守備側が「奪う」ために1アクション消費。
-            // 攻守が入れ替わり（自分が攻撃側になり）、元々の手番の上限（2アクション）が適用されます。
-            // 1（奪うのに使った分） + 1（残り） = 合計2アクションとなるよう、残りアクション数を一律「1」にします。
+            // 攻守交代
             attackerSide = (attackerSide === 1) ? 2 : 1;
-            currentTurnSide = attackerSide; 
-            actionsLeft = 1; // 奪取に1消費したため、この手番内では残り1アクション
+            currentTurnSide = attackerSide;
+            
+            // ★【修正点】奪う行動自体で1アクション消費したとみなす
+            // 本来2アクションもらえる攻撃ターンですが、残り「1アクション」になります。
+            actionsLeft = 1; 
 
             updateGUI();
-            showMessage(`ボール奪取！攻守交代、残り1アクション。`);
+            alert(`ボール奪取！ 攻守交代でターンが継続します（残り1行動）。`);
         }
 
         function finishAction() {
@@ -322,34 +322,31 @@
 
         function switchTurn() {
             currentTurnSide = (currentTurnSide === 1) ? 2 : 1;
-            // 攻撃側なら2回、守備側なら1回アクションを付与
             actionsLeft = (currentTurnSide === attackerSide) ? 2 : 1;
 
             if (currentTurnSide === attackerSide) {
-                lastRobbedPiece = null; // ターンが丸ごと1周したら制限解除
+                lastRobbedPiece = null; // ターンが完全に1周したら制限解除
             }
             updateGUI();
         }
 
         function checkVictory() {
-            // 赤の勝利条件：一番左の端のマス（c=0）に到達
             if (attackerSide === 1 && ballPos.c === 0) {
                 gameOver = true;
                 document.getElementById('info-panel').innerHTML = '<span style="color:#ff5252; font-size:1.4rem;">赤 (RED) の得点！勝利！</span>';
-                setTimeout(() => { alert("赤（RED）が得点しました！勝利です！"); }, 10);
+                setTimeout(() => { alert("赤（RED）が左端のゴールに到達しました！勝利です！"); }, 10);
                 return true;
             }
-            // 青の勝利条件：一番右の端のマス（c=9）に到達
             if (attackerSide === 2 && ballPos.c === COLS - 1) {
                 gameOver = true;
                 document.getElementById('info-panel').innerHTML = '<span style="color:#448aff; font-size:1.4rem;">青 (BLUE) の得点！勝利！</span>';
-                setTimeout(() => { alert("青（BLUE）が得点しました！勝利です！"); }, 10);
+                setTimeout(() => { alert("青（BLUE）が右端のゴールに到達しました！勝利です！"); }, 10);
                 return true;
             }
             return false;
         }
 
-        // ゲーム開始
+        // 起動
         setupGame();
         createBoardGUI();
         updateGUI();
