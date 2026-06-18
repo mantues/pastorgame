@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Pastor (7x10 機能追加版) - スマホ対戦</title>
+    <title>Pastor (アンドゥ＆エリア制限版) - スマホ対戦</title>
     <style>
         body {
             font-family: 'Helvetica Neue', Arial, sans-serif;
@@ -19,35 +19,9 @@
             box-sizing: border-box;
         }
 
-        #top-bar {
-            display: flex;
-            justify-content: center;
-            width: 100%;
-            max-width: 450px;
-            margin-bottom: 10px;
-        }
-
-        #undo-btn {
-            background-color: #e0e0e0;
-            color: #333333;
-            border: none;
-            padding: 8px 20px;
-            font-size: 1rem;
-            font-weight: bold;
-            border-radius: 20px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
-            cursor: pointer;
-            touch-action: manipulation;
-        }
-
-        #undo-btn:active {
-            background-color: #b0b0b0;
-            transform: scale(0.95);
-        }
-
         #info-panel {
             text-align: center;
-            margin-bottom: 15px;
+            margin-bottom: 10px;
             font-size: 1.1rem;
             font-weight: bold;
             padding: 10px;
@@ -58,10 +32,32 @@
             box-shadow: 0 4px 6px rgba(0,0,0,0.3);
         }
 
+        /* 一手戻すボタンのスタイル */
+        #undo-btn {
+            background-color: #555555;
+            color: #ffffff;
+            border: none;
+            padding: 10px 20px;
+            font-size: 1rem;
+            font-weight: bold;
+            border-radius: 6px;
+            margin-bottom: 15px;
+            cursor: pointer;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.4);
+            transition: opacity 0.2s, background-color 0.2s;
+            touch-action: manipulation;
+        }
+        #undo-btn:disabled {
+            opacity: 0.4; /* 履歴がない場合は半透明 */
+            cursor: not-allowed;
+        }
+        #undo-btn:active:not(:disabled) {
+            background-color: #333333;
+        }
+
         #board {
             display: grid;
             grid-template-rows: repeat(10, 1fr);
-            /* 両端の列（0列目と6列目）の横幅を半分(0.5fr)に設定 */
             grid-template-columns: 0.5fr repeat(5, 1fr) 0.5fr;
             gap: 2px;
             background-color: #444444;
@@ -82,11 +78,9 @@
             touch-action: manipulation;
         }
 
-        /* 両端の得点ゴールエリアの色付け */
         .cell.goal-red { background-color: #4a1a1a; }
         .cell.goal-blue { background-color: #1a2a4a; }
 
-        /* 選択中のハイライト */
         .cell.selected {
             outline: 3px solid #ff9800;
             outline-offset: -3px;
@@ -101,7 +95,6 @@
             align-items: center;
             justify-content: center;
             box-shadow: 0 4px 6px rgba(0,0,0,0.4);
-            transition: transform 0.1s ease;
         }
 
         .piece.red { background-color: #ff5252; border: 2px solid #b71c1c; }
@@ -128,10 +121,8 @@
 </head>
 <body>
 
-    <div id="top-bar">
-        <button id="undo-btn" onclick="handleUndo()">一手戻す</button>
-    </div>
     <div id="info-panel">読み込み中...</div>
+    <button id="undo-btn" onclick="handleUndo()" disabled>一手戻す</button>
     <div id="board"></div>
     <div id="msg-panel"></div>
 
@@ -139,18 +130,17 @@
         const ROWS = 10;
         const COLS = 7;
 
-        // ゲーム状態
         let board = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
-        let ballPos = { r: 4, c: 5 }; 
+        let ballPos = { r: 4, c: 5 };
         let attackerSide = 1;         // 1: 赤, 2: 青
         let currentTurnSide = 2;      // 最初の手番は守備側（青）
-        let actionsLeft = 1;          
+        let actionsLeft = 1;
         let selectedPos = null;
-        let lastRobbedPiece = null;   
+        let lastRobbedPiece = null;
         let gameOver = false;
 
-        // 履歴保存用のスタック
-        let historyStack = [];
+        // 一手戻すための履歴スタック
+        let history = [];
 
         function setupGame() {
             board = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
@@ -159,16 +149,16 @@
             
             ballPos = { r: 4, c: 5 };
             attackerSide = 1;
-            currentTurnSide = 2; 
+            currentTurnSide = 2;
             actionsLeft = 1;
             gameOver = false;
             selectedPos = null;
             lastRobbedPiece = null;
-            historyStack = [];
+            history = [];
         }
 
-        // 現在の状態をコピーして履歴に保存する
-        function saveHistory() {
+        // 盤面の完全な状態をディープコピーして履歴に保存
+        function saveState() {
             const state = {
                 board: board.map(row => [...row]),
                 ballPos: { ...ballPos },
@@ -177,31 +167,27 @@
                 actionsLeft: actionsLeft,
                 lastRobbedPiece: lastRobbedPiece ? { ...lastRobbedPiece } : null
             };
-            historyStack.push(state);
+            history.push(state);
+            document.getElementById('undo-btn').disabled = false;
         }
 
-        // 一手戻すボタンが押されたとき
         function handleUndo() {
-            if (historyStack.length === 0) {
-                showMessage("これ以上戻せません。");
-                return;
-            }
-            if (gameOver) {
-                // ゲーム終了時でも巻き戻せるようにフラグ解除
-                gameOver = false;
-            }
+            if (history.length === 0 || gameOver) return;
             
-            const prevState = historyStack.pop();
+            const prevState = history.pop();
             board = prevState.board;
             ballPos = prevState.ballPos;
             attackerSide = prevState.attackerSide;
             currentTurnSide = prevState.currentTurnSide;
             actionsLeft = prevState.actionsLeft;
             lastRobbedPiece = prevState.lastRobbedPiece;
-            selectedPos = null;
             
-            showMessage("一手戻しました。");
+            selectedPos = null;
+            if (history.length === 0) {
+                document.getElementById('undo-btn').disabled = true;
+            }
             updateGUI();
+            showMessage("一手戻しました。");
         }
 
         function createBoardGUI() {
@@ -225,13 +211,16 @@
         }
 
         function updateGUI() {
-            const info = document.getElementById('info-panel');
             if (gameOver) return;
 
+            const info = document.getElementById('info-panel');
             const role = (currentTurnSide === attackerSide) ? "攻撃側" : "守備側";
             const sideText = (currentTurnSide === 1) ? "赤 (RED)" : "青 (BLUE)";
             const color = (currentTurnSide === 1) ? "#ff5252" : "#448aff";
             info.innerHTML = `手番: <span style="color: ${color}">${sideText} [${role}]</span><br>残り行動: ${actionsLeft}`;
+
+            // ボタンの有効・無効を履歴数に応じて切り替え
+            document.getElementById('undo-btn').disabled = (history.length === 0);
 
             const cells = document.querySelectorAll('.cell');
             cells.forEach(cell => {
@@ -279,11 +268,10 @@
             if (gameOver) return;
             const clickedPiece = board[r][c];
 
-            // パス判定 (味方コマをタップした場合)
+            // パス最優先判定
             if (selectedPos && currentTurnSide === attackerSide) {
                 if (clickedPiece === currentTurnSide && (selectedPos.r !== r || selectedPos.c !== c)) {
                     if (selectedPos.r === ballPos.r && selectedPos.c === ballPos.c) {
-                        // パス先が両端(c=0, c=6)になることは構成上ありませんが、ルールに準拠
                         actionPass(selectedPos, { r, c });
                         selectedPos = null;
                         updateGUI();
@@ -292,42 +280,33 @@
                 }
             }
 
-            // 1. 自分の手番のコマを選択
             if (clickedPiece === currentTurnSide) {
                 selectedPos = { r, c };
                 updateGUI();
                 return;
             }
 
-            // 2. 移動またはボール奪取の実行
             if (selectedPos) {
                 const dist = Math.max(Math.abs(selectedPos.r - r), Math.abs(selectedPos.c - c));
 
-                // 【新規制限ルール】ボールを持っていないコマは左端(c=0)・右端(c=6)に進入できない
-                const isMovingBall = (selectedPos.r === ballPos.r && selectedPos.c === ballPos.c);
-                if ((c === 0 || c === COLS - 1) && !isMovingBall) {
-                    showMessage("ボールを持っていないコマは端のマスへ移動できません。", true);
-                    selectedPos = null;
-                    updateGUI();
-                    return;
-                }
-
-                // --- 守備側の行動 ---
                 if (currentTurnSide !== attackerSide) {
-                    // ボールを奪う
+                    // 守備側：ボールを奪う
                     if (r === ballPos.r && c === ballPos.c && dist === 1) {
                         actionSteal(selectedPos, { r, c });
                     }
-                    // コマを動かす
+                    // 守備側：コマを動かす
                     else if (clickedPiece === 0 && dist === 1) {
-                        actionMove(selectedPos, { r, c });
+                        if (validateMove(selectedPos, { r, c })) {
+                            actionMove(selectedPos, { r, c });
+                        }
                     }
                 } 
-                // --- 攻撃側の行動 ---
                 else {
-                    // コマを動かす
+                    // 攻撃側：コマを動かす
                     if (clickedPiece === 0 && dist === 1) {
-                        actionMove(selectedPos, { r, c });
+                        if (validateMove(selectedPos, { r, c })) {
+                            actionMove(selectedPos, { r, c });
+                        }
                     }
                 }
                 selectedPos = null;
@@ -335,9 +314,35 @@
             }
         }
 
-        function actionMove(start, end) {
-            saveHistory(); // アクションが確定する前に歴史を保存
+        // 移動制限ルールのチェック
+        function validateMove(start, end) {
+            const isBallCarrier = (start.r === ballPos.r && start.c === ballPos.c);
+            
+            // ルール: 左端1列目(c=0)、右端1列目(c=6)にはボールを持っていないコマは移動できない
+            if (!isBallCarrier && (end.c === 0 || end.c === COLS - 1)) {
+                showMessage("ボールを持っていないコマは端の列に入れません。", true);
+                return false;
+            }
 
+            // ルール: ボールを持っていても自陣側の端の列には移動できない
+            if (isBallCarrier) {
+                // 赤がボール所持かつ赤の自陣(右端 c=6)へ移動しようとした場合
+                if (board[start.r][start.c] === 1 && end.c === COLS - 1) {
+                    showMessage("ボール保持者は自陣側の端の列には戻れません。", true);
+                    return false;
+                }
+                // 青がボール所持かつ青の自陣(左端 c=0)へ移動しようとした場合
+                if (board[start.r][start.c] === 2 && end.c === 0) {
+                    showMessage("ボール保持者は自陣側の端の列には戻れません。", true);
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        function actionMove(start, end) {
+            saveState(); // 行動前に状態を保存
+            
             board[end.r][end.c] = board[start.r][start.c];
             board[start.r][start.c] = 0;
 
@@ -350,14 +355,14 @@
 
         function actionPass(start, end) {
             let isValid = false;
-            if (attackerSide === 1) {
+            if (attackerSide === 1) { // 赤攻撃: 後ろは右（列大）
                 if (end.c > start.c) isValid = true;
-            } else {
+            } else {                  // 青攻撃: 後ろは左（列小）
                 if (end.c < start.c) isValid = true;
             }
 
             if (isValid) {
-                saveHistory(); // パス成功前に歴史を保存
+                saveState(); // パス成功直前に状態保存
                 ballPos = { r: end.r, c: end.c };
                 finishAction();
             } else {
@@ -372,17 +377,17 @@
                 return;
             }
 
-            saveHistory(); // ボールを奪う前に歴史を保存
+            saveState(); // 奪取前に状態を保存
 
             ballPos = { r: stealer.r, c: stealer.c };
             lastRobbedPiece = { r: ball.r, c: ball.c };
 
             attackerSide = (attackerSide === 1) ? 2 : 1;
             currentTurnSide = attackerSide;
-            actionsLeft = 1; // 奪取直後は1アクション限定
+            actionsLeft = 1; // 奪取後は1アクション
 
             updateGUI();
-            alert(`ボール奪取！ 攻守が交代し、${attackerSide === 1 ? '赤' : '青'}の攻撃です。（残りの行動は1回です）`);
+            alert(`ボール奪取！ 攻守が交代し、${attackerSide === 1 ? '赤' : '青'}の攻撃です。(残り1アクション)`);
         }
 
         function finishAction() {
@@ -399,7 +404,7 @@
             actionsLeft = (currentTurnSide === attackerSide) ? 2 : 1;
 
             if (currentTurnSide === attackerSide) {
-                lastRobbedPiece = null; 
+                lastRobbedPiece = null;
             }
             updateGUI();
         }
